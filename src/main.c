@@ -167,5 +167,8 @@ int main(void) {
             calculate_time();
             DisplayTime(hours, minutes, seconds); // Opdater display
         }
+        shallom = 0; // Nulstil flag for at undgå gentagne opdateringer
+        // Opdater display med tid  
+        
     }
 }
