@@ -51,22 +51,45 @@ void timer1_pwm_init() {
     TCCR1B = (1 << WGM12) | (1 << CS11);    
 }
 
-// === ADC ===
+
+// === ADC with interrupt ===
+volatile uint8_t pwm_value = 0;
+
 void adc_init(void) {
     ADMUX = (1 << REFS0);
-    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); //prescaler på 128 (side 293 i databladet)
-}
+    ADCSRA = (1 << ADEN)                                //enable ADC (input på Pin A0)
+           | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0) // prescaler = 128 → 125 kHz(side 293 i databladet)
+           | (1 << ADIE)                                //enable ADC-interrupt
+           | (1 << ADATE);                              //enable auto-trigger
+           
+    ADCSRB = 0x00;                                      //aktivere free-running mode så den kontinuerligt tjekker for opdateringer
+    ADCSRA |= (1 << ADSC);                              //starter den første konvetering fra analog til digital. Derefter sker konveteringen sammen med auto-trigger cyklussen
+}   
 
-uint16_t adc_read(void) {
+
+/*uint16_t adc_read(void) {     //læser ADC-værdi med polling
     ADMUX = (ADMUX & 0xF0) | 0;
     ADCSRA |= (1 << ADSC);
     while (ADCSRA & (1 << ADSC));
     return ADC;
-}
+}*/
 
-// === UART Commands ===
 uint8_t min_pwm = 0;
 uint8_t max_pwm = 255;
+
+ISR(ADC_vect) {                 //læser ADC-værdi med interrupt
+    uint16_t adc_value = ADC;
+    uint8_t temp_pwm = adc_value / 4;
+
+    if (temp_pwm < min_pwm) temp_pwm = min_pwm;
+    if (temp_pwm > max_pwm) temp_pwm = max_pwm;
+
+    pwm_value = temp_pwm;
+    OCR1A = pwm_value;
+}
+
+
+// === UART Commands ===
 
 void process_uart_command(void) {
     uart_send_string("Got: ");
@@ -114,18 +137,18 @@ int main(void) {
                 } else {
                     current_state = STATE_UPDATE_DISPLAY;
                 }
-                uart_send_string("[STATE] IDLE\r\n");
+                //uart_send_string("[STATE] IDLE\r\n");
                 break;
 
             case STATE_UART_RECEIVED:   //modtager input fra UART, tolker MIN og MAX værdier
                 uart_rx_flag = 0;
                 process_uart_command();
                 current_state = STATE_IDLE;
-                uart_send_string("[STATE] UART_RECEIVED\r\n");
+                //uart_send_string("[STATE] UART_RECEIVED\r\n");
                 break;
 
             case STATE_UPDATE_DISPLAY: { //opdaterer displayet med PWM værdi og ADC værdi
-                uint16_t adc_value = adc_read();
+                uint16_t adc_value = pwm_value;
                 uint8_t pwm_value = 255 - (adc_value / 4);
 
                 if (pwm_value < min_pwm) pwm_value = min_pwm;
@@ -158,7 +181,7 @@ int main(void) {
 
                 _delay_ms(200);
                 current_state = STATE_IDLE;
-                uart_send_string("[STATE] UPDATE_DISPLAY\r\n");
+                //uart_send_string("[STATE] UPDATE_DISPLAY\r\n");
                 break;
             }
         }
