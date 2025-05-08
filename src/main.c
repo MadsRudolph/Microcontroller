@@ -53,26 +53,49 @@ ISR(USART0_RX_vect) {
 // === Timer1 PWM ===
 void timer1_pwm_init() {
     DDRB |= (1 << PB5);
-    TCCR1A = (1 << COM1A1) | (1 << WGM10);
-    TCCR1B = (1 << WGM12) | (1 << CS11);
+    TCCR1A = (1 << COM1A1) | (1 << WGM10); 
+    TCCR1B = (1 << WGM12) | (1 << CS11);    
 }
 
-// === ADC ===
+
+// === ADC with interrupt ===
+volatile uint8_t pwm_value = 0;
+
 void adc_init(void) {
     ADMUX = (1 << REFS0);
-    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1);
-}
+    ADCSRA = (1 << ADEN)                                //enable ADC (input på Pin A0)
+           | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0) // prescaler = 128 → 125 kHz(side 293 i databladet)
+           | (1 << ADIE)                                //enable ADC-interrupt
+           | (1 << ADATE);                              //enable auto-trigger
+           
+    ADCSRB = 0x00;                                      //aktivere free-running mode så den kontinuerligt tjekker for opdateringer
+    ADCSRA |= (1 << ADSC);                              //starter den første konvetering fra analog til digital. Derefter sker konveteringen sammen med auto-trigger cyklussen
+}   
 
-uint16_t adc_read(void) {
+
+/*uint16_t adc_read(void) {     //læser ADC-værdi med polling
     ADMUX = (ADMUX & 0xF0) | 0;
     ADCSRA |= (1 << ADSC);
     while (ADCSRA & (1 << ADSC));
     return ADC;
-}
+}*/
 
-// === UART Commands ===
 uint8_t min_pwm = 0;
 uint8_t max_pwm = 255;
+
+ISR(ADC_vect) {                 //læser ADC-værdi med interrupt
+    uint16_t adc_value = ADC;
+    uint8_t temp_pwm = adc_value / 4;
+
+    if (temp_pwm < min_pwm) temp_pwm = min_pwm;
+    if (temp_pwm > max_pwm) temp_pwm = max_pwm;
+
+    pwm_value = temp_pwm;
+    OCR1A = pwm_value;
+}
+
+
+// === UART Commands ===
 
 void process_uart_command(void) {
     uart_send_string("Got: ");
@@ -112,7 +135,7 @@ int main(void) {
     clear_display();
     sei();
 
-    uart_send_string("UART Ready, input values for MIN and MAX!\r\n");
+    uart_send_string("UART Ready, input values for MIN: / MAX: !\r\n");
 
     SystemState current_state = STATE_RESET;
     char buffer1[20];
@@ -124,6 +147,7 @@ int main(void) {
 
         switch (current_state) {
 
+
             case STATE_RESET:
                 if (button_flag) {
                     _delay_ms(100);
@@ -133,33 +157,41 @@ int main(void) {
                 clear_display();
                 current_state = STATE_IDLE; }
                 break;
+            
+            case STATE_IDLE:            //tjekker om der er ny MIN/MAX værdi fra UART
 
-            case STATE_IDLE:
                 if (uart_rx_flag) {
                     current_state = STATE_UART_RECEIVED;
                 } else {
                     current_state = STATE_UPDATE_DISPLAY;
                 }
+                //uart_send_string("[STATE] IDLE\r\n");
                 break;
 
-            case STATE_UART_RECEIVED:
+            case STATE_UART_RECEIVED:   //modtager input fra UART, tolker MIN og MAX værdier
                 uart_rx_flag = 0;
                 process_uart_command();
                 current_state = STATE_IDLE;
+                //uart_send_string("[STATE] UART_RECEIVED\r\n");
                 break;
 
-            case STATE_UPDATE_DISPLAY: {
-                uint16_t adc_value = adc_read();
-                uint8_t pwm_value = 255 - (adc_value / 4);
+            case STATE_UPDATE_DISPLAY: { //opdaterer displayet med PWM værdi og ADC værdi
+                uint16_t adc_value = pwm_value;
+                uint8_t local_pwm = pwm_value;
 
                 if (pwm_value < min_pwm) pwm_value = min_pwm;
                 if (pwm_value > max_pwm) pwm_value = max_pwm;
 
                 OCR1A = pwm_value;
 
-                uint8_t percent = (pwm_value * 100) / 255;
+                uint8_t percent = (local_pwm * 100) / 255;
                 snprintf(buffer1, sizeof(buffer1), "Duty: %3u%%     ", percent);
                 snprintf(buffer2, sizeof(buffer2), "PWM:  %3u       ", pwm_value);
+
+                char debug_line[20];
+                snprintf(debug_line, sizeof(debug_line), "Min:%3u Max:%3u", min_pwm, max_pwm); //viser min og max grænser
+                sendStrXY(debug_line, 2, 0);
+
 
                 char bar[17];
                 uint8_t bar_length = (percent * 16) / 100;
@@ -195,4 +227,7 @@ int main(void) {
             }
         }
     }
+
+
+    
 }
