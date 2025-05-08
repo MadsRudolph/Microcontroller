@@ -96,7 +96,7 @@ int main(void) {
     clear_display();
     sei(); // Enable global interrupts
 
-    uart_send_string("UART Ready!\r\n");
+    uart_send_string("UART Ready, input values for MIN and MAX!\r\n");
 
     char buffer1[20];
     char buffer2[20];
