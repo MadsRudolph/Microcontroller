@@ -41,75 +41,48 @@ int main(void)
     I2C_Init();
     InitializeDisplay();
     adc_init();
-    //-------------------------test af LED-------------------------//
-   /*    
-        Testede den ved at få den til at følge PWM-signalets duty cycle som 
-        det steg eller faldt ved gradvist at tænde eller slukke LED´en for at passe til den 
 
-        uint8_t brightness = 0;
-         int8_t step = 1;
-    
-    while (1)
-    {
-        OCR1A = brightness; //sæt duty cycle (0-255)
-
-        brightness += step; //justere lysstyrken
-
-        //vend retning af duty cycle ved min/ max værdi
-        if (brightness == 0 || brightness ==255)    //min / max grænser for Duty Cycle
-        {
-            step  = -step;
-        }
-
-        _delay_ms(10);
-    }
-    */
-    //-------------------------test af LED-------------------------//
-   
-    //-------------------------test af OLED-Display-------------------------//
-    /*uint8_t brightness = 0;
-    int8_t step = 1;
-    char buffer[16];
-
-    while (1)
-    {
-    OCR1A = brightness;
-
-    // Konverter til procent og formatter tekst
-    uint8_t percent = (brightness * 100) / 255;
-    snprintf(buffer, sizeof(buffer), "Duty: %3u%%", percent);
-
-    // clear_display();                    // Ryd displayet            (gør at skærmen tænder og slukker ved hver opdatering: BRUG IKKE HER)                    // Ryd displayet
-    sendStrXY(buffer, 0, 0);               // Vis teksten på øverste linje
-
-    // Fortsæt fade...
-    brightness += step;
-    if (brightness == 0 || brightness == 255)
-        step = -step;
-
-    _delay_ms(30);
-    }*/
-    //-------------------------test af OLED-Display-------------------------//
-
-    //-------------------------test af Potentiometer-------------------------//
+  
     char buffer1[20];
     char buffer2[20];
     
     while (1)
     {
         uint16_t adc_value = adc_read();           // 0–1023
-        uint8_t pwm_value = adc_value / 4;         // 0–255
-        OCR1A = pwm_value;                         // Sæt PWM duty
+        uint8_t pwm_value = 255 - (adc_value / 4); // 0–255
 
-        uint8_t percent = (pwm_value * 100) / 255;
-        snprintf(buffer1, sizeof(buffer1), "Duty: %3u%%   ", percent);
+        OCR1A = pwm_value;                         // Set PWM duty
+
+        uint8_t percent = (pwm_value * 100) / 255; 
+        snprintf(buffer1, sizeof(buffer1), "Duty: %3u%%   ", percent); 
         snprintf(buffer2, sizeof(buffer2), "PWM:  %3u     ", pwm_value);
-        
-        sendStrXY(buffer1, 0, 0);    //øverste linje AKA linje 1
-        sendStrXY(buffer2, 1, 0);    //linje 2
 
-        _delay_ms(50);
+        // ✨ Bar Animation
+        char bar[17];
+        uint8_t bar_length = (percent * 16) / 100;
+
+        for (uint8_t i = 0; i < 16; i++) {
+            if (i < bar_length)
+                bar[i] = 0xFF; // Full block (or use '=' if OLED can't handle 0xFF)
+            else
+                bar[i] = ' ';
+        }
+        bar[16] = '\0';
+
+        // 💅 MAX duty = blinking sass
+        static uint8_t blink = 0;
+        char max_msg[17] = "                ";
+
+        if (percent >= 99) {
+            if (blink)
+                snprintf(max_msg, sizeof(max_msg), " MAX!");
+            blink = !blink;
+        }
+        sendStrXY(buffer2, 0, 0); // Line 0 
+        sendStrXY(buffer1, 1, 0); // Line 1
+        sendStrXY(bar, 2, 0);     // Line 2
+        sendStrXY(max_msg, 3, 0); // Line 3 
+
+        _delay_ms(200); // Give it a bit more breathing room for da drama 💅
     }
-    //-------------------------test af Potentiometer-------------------------//
-
 }
