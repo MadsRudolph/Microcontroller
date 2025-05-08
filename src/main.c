@@ -100,7 +100,7 @@ int main(void) {
     clear_display();
     sei();
 
-    uart_send_string("UART Ready, input values for MIN and MAX!\r\n");
+    uart_send_string("UART Ready, input values for MIN: and MAX: !\r\n");
 
     SystemState current_state = STATE_IDLE;
     char buffer1[20];
