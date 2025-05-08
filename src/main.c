@@ -15,6 +15,7 @@
 volatile char uart_buffer[32];
 volatile uint8_t uart_index = 0;
 volatile uint8_t uart_rx_flag = 0;
+volatile int button_flag = 0; // Flag for button press
 
 void uart_init(unsigned int ubrr) {
     UBRR0H = (unsigned char)(ubrr >> 8);
@@ -22,6 +23,11 @@ void uart_init(unsigned int ubrr) {
     UCSR0A = (1 << U2X0);
     UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0);
     UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+
+
+    PORTE |= (1<<PE4);  // Aktivér pull-up modstand
+    EIMSK |= (1<<INT4); // Aktiver INT4
+    EICRB |= (1<<ISC41); // Trigger INT4 på stigende flanke 
 }
 
 void uart_send(char data) {
@@ -109,10 +115,16 @@ void process_uart_command(void) {
 
 // === FSM States ===
 typedef enum {
+    STATE_RESET,
     STATE_IDLE,
     STATE_UART_RECEIVED,
     STATE_UPDATE_DISPLAY
 } SystemState;
+
+// Interrupt Service Routine (ISR) for INT4 (knaptryk)
+ISR(INT4_vect) {
+    button_flag = 1; // Sæt flag når knappen trykkes
+}
 
 int main(void) {
     timer1_pwm_init();
@@ -125,13 +137,29 @@ int main(void) {
 
     uart_send_string("UART Ready, input values for MIN: / MAX: !\r\n");
 
-    SystemState current_state = STATE_IDLE;
+    SystemState current_state = STATE_RESET;
     char buffer1[20];
     char buffer2[20];
 
     while (1) {
+
+      
+
         switch (current_state) {
+
+
+            case STATE_RESET:
+                if (button_flag) {
+                    _delay_ms(100);
+                    button_flag = 0; // Reset button flag
+                  
+                InitializeDisplay();
+                clear_display();
+                current_state = STATE_IDLE; }
+                break;
+            
             case STATE_IDLE:            //tjekker om der er ny MIN/MAX værdi fra UART
+
                 if (uart_rx_flag) {
                     current_state = STATE_UART_RECEIVED;
                 } else {
@@ -184,9 +212,17 @@ int main(void) {
                 sendStrXY(bar, 3, 0);
                 sendStrXY(max_msg, 4, 0);
 
-                _delay_ms(50);
+                _delay_ms(200);
+                  if (button_flag) {
+                    _delay_ms(100);
+                       
+                    current_state = STATE_RESET; // Go back to reset state
+                  }
+                  else if (uart_rx_flag) {
+                    current_state = STATE_UART_RECEIVED;
+                   } else
                 current_state = STATE_IDLE;
-                uart_send_string("[STATE] UPDATE_DISPLAY\r\n");
+
                 break;
             }
         }
