@@ -149,16 +149,21 @@ int main(void) {
 
             case STATE_UPDATE_DISPLAY: { //opdaterer displayet med PWM værdi og ADC værdi
                 uint16_t adc_value = pwm_value;
-                uint8_t pwm_value = 255 - (adc_value / 4);
+                uint8_t local_pwm = pwm_value;
 
                 if (pwm_value < min_pwm) pwm_value = min_pwm;
                 if (pwm_value > max_pwm) pwm_value = max_pwm;
 
                 OCR1A = pwm_value;
 
-                uint8_t percent = (pwm_value * 100) / 255;
+                uint8_t percent = (local_pwm * 100) / 255;
                 snprintf(buffer1, sizeof(buffer1), "Duty: %3u%%     ", percent);
                 snprintf(buffer2, sizeof(buffer2), "PWM:  %3u       ", pwm_value);
+
+                char debug_line[20];
+                snprintf(debug_line, sizeof(debug_line), "Min:%3u Max:%3u", min_pwm, max_pwm); //viser min og max grænser
+                sendStrXY(debug_line, 2, 0);
+
 
                 char bar[17];
                 uint8_t bar_length = (percent * 16) / 100;
@@ -179,9 +184,9 @@ int main(void) {
                 sendStrXY(bar, 3, 0);
                 sendStrXY(max_msg, 4, 0);
 
-                _delay_ms(200);
+                _delay_ms(50);
                 current_state = STATE_IDLE;
-                //uart_send_string("[STATE] UPDATE_DISPLAY\r\n");
+                uart_send_string("[STATE] UPDATE_DISPLAY\r\n");
                 break;
             }
         }
