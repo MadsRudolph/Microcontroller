@@ -93,6 +93,7 @@ int main(void) {
     InitializeDisplay();
     adc_init();
     uart_init(MYUBRR);
+    clear_display();
     sei(); // Enable global interrupts
 
     uart_send_string("UART Ready!\r\n");
