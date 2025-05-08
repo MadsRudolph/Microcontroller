@@ -95,7 +95,7 @@ int main(void) {
     uart_init(MYUBRR);
     sei(); // Enable global interrupts
 
-    uart_send_string("UART Ready, Queen!\r\n");
+    uart_send_string("UART Ready!\r\n");
 
     char buffer1[20];
     char buffer2[20];
