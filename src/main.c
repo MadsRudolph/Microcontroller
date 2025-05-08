@@ -100,7 +100,7 @@ int main(void) {
     clear_display();
     sei();
 
-    uart_send_string("UART Ready, input values for MIN: and MAX: !\r\n");
+    uart_send_string("UART Ready, input values for MIN: / MAX: !\r\n");
 
     SystemState current_state = STATE_IDLE;
     char buffer1[20];
@@ -108,7 +108,7 @@ int main(void) {
 
     while (1) {
         switch (current_state) {
-            case STATE_IDLE:
+            case STATE_IDLE:            //tjekker om der er ny MIN/MAX værdi fra UART
                 if (uart_rx_flag) {
                     current_state = STATE_UART_RECEIVED;
                 } else {
@@ -116,13 +116,13 @@ int main(void) {
                 }
                 break;
 
-            case STATE_UART_RECEIVED:
+            case STATE_UART_RECEIVED:   //modtager input fra UART, tolker MIN og MAX værdier
                 uart_rx_flag = 0;
                 process_uart_command();
                 current_state = STATE_IDLE;
                 break;
 
-            case STATE_UPDATE_DISPLAY: {
+            case STATE_UPDATE_DISPLAY: { //opdaterer displayet med PWM værdi og ADC værdi
                 uint16_t adc_value = adc_read();
                 uint8_t pwm_value = 255 - (adc_value / 4);
 
@@ -160,4 +160,7 @@ int main(void) {
             }
         }
     }
+
+
+    
 }
