@@ -141,5 +141,6 @@ int main(void) {
         sendStrXY(max_msg, 4, 0); // Line 3
 
         _delay_ms(200);
+    
     }
 }
