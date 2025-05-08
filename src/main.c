@@ -4,23 +4,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <avr/interrupt.h> 
 #include "I2C.h"
 #include "ssd1306.h"
 
 // === UART Setup ===
-#define BAUD 9600
-#define MYUBRR F_CPU/16/BAUD-1
+#define BAUD 19200
+#define MYUBRR F_CPU/8/BAUD-1
+
+volatile char uart_buffer[32];
+volatile uint8_t uart_index = 0;
+volatile uint8_t uart_rx_flag = 0;
 
 void uart_init(unsigned int ubrr) {
     UBRR0H = (unsigned char)(ubrr >> 8);
     UBRR0L = (unsigned char)ubrr;
-    UCSR0B = (1 << RXEN0) | (1 << TXEN0); // Enable RX & TX
+    UCSR0A = (1 << U2X0); // Double speed mode because F_CPU/8
+    UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0); // Enable RX, TX, and RX interrupt
     UCSR0C = (1 << UCSZ01) | (1 << UCSZ00); // 8-bit data
-}
-
-char uart_receive(void) {
-    while (!(UCSR0A & (1 << RXC0)));
-    return UDR0;
 }
 
 void uart_send(char data) {
@@ -30,6 +31,19 @@ void uart_send(char data) {
 
 void uart_send_string(const char* str) {
     while (*str) uart_send(*str++);
+}
+
+// === ISR for UART Reception ===
+ISR(USART0_RX_vect) {
+    char received = UDR0;
+
+    if (received == '\r' || received == '\n') {
+        uart_buffer[uart_index] = '\0';
+        uart_index = 0;
+        uart_rx_flag = 1;
+    } else if (uart_index < sizeof(uart_buffer) - 1) {
+        uart_buffer[uart_index++] = received;
+    }
 }
 
 // === Timer1 PWM ===
@@ -46,42 +60,29 @@ void adc_init(void) {
 }
 
 uint16_t adc_read(void) {
-    ADMUX = (ADMUX & 0xF0) | 0; 
+    ADMUX = (ADMUX & 0xF0) | 0;
     ADCSRA |= (1 << ADSC);
     while (ADCSRA & (1 << ADSC));
     return ADC;
 }
 
-// === UART Command Parser ===
+// === UART Command Handling ===
 uint8_t min_pwm = 0;
 uint8_t max_pwm = 255;
 
-void handle_uart_input(void) {
-    static char buffer[20];
-    static uint8_t idx = 0;
+void process_uart_command(void) {
+    uart_send_string("Got: ");
+    uart_send_string((char*)uart_buffer);
+    uart_send_string("\r\n");
 
-    if (UCSR0A & (1 << RXC0)) {
-        char c = uart_receive();
-        uart_send(c); // Echo received char for debug
-
-
-        if (c == '\n') {
-            buffer[idx] = '\0';
-
-            if (strncmp(buffer, "MIN:", 4) == 0) {
-                min_pwm = atoi(&buffer[4]);
-                uart_send_string("Min PWM updated!\r\n");
-            } else if (strncmp(buffer, "MAX:", 4) == 0) {
-                max_pwm = atoi(&buffer[4]);
-                uart_send_string("Max PWM updated!\r\n");
-            } else {
-                uart_send_string("Invalid UART command!\r\n");
-            }
-
-            idx = 0;
-        } else if (idx < sizeof(buffer) - 1) {
-            buffer[idx++] = c;
-        }
+    if (strncmp((char*)uart_buffer, "MIN:", 4) == 0) {
+        min_pwm = atoi((char*)&uart_buffer[4]);
+        uart_send_string("Min PWM updated!\r\n");
+    } else if (strncmp((char*)uart_buffer, "MAX:", 4) == 0) {
+        max_pwm = atoi((char*)&uart_buffer[4]);
+        uart_send_string("Max PWM updated!\r\n");
+    } else {
+        uart_send_string("Invalid UART command!\r\n");
     }
 }
 
@@ -92,26 +93,29 @@ int main(void) {
     InitializeDisplay();
     adc_init();
     uart_init(MYUBRR);
-    uart_send_string("UART Ready, Queen!\r\n");
+    sei(); // Enable global interrupts
 
+    uart_send_string("UART Ready, Queen!\r\n");
 
     char buffer1[20];
     char buffer2[20];
 
     while (1) {
-        handle_uart_input(); // Handle any serial commands
+        if (uart_rx_flag) {
+            uart_rx_flag = 0;
+            process_uart_command();
+        }
 
         uint16_t adc_value = adc_read();           // 0–1023
         uint8_t pwm_value = 255 - (adc_value / 4); // Inverted
 
-        // Clamp PWM value
         if (pwm_value < min_pwm) pwm_value = min_pwm;
         if (pwm_value > max_pwm) pwm_value = max_pwm;
 
         OCR1A = pwm_value;
 
-        uint8_t percent = (pwm_value * 100) / 255; 
-        snprintf(buffer1, sizeof(buffer1), "Duty: %3u%%     ", percent); 
+        uint8_t percent = (pwm_value * 100) / 255;
+        snprintf(buffer1, sizeof(buffer1), "Duty: %3u%%     ", percent);
         snprintf(buffer2, sizeof(buffer2), "PWM:  %3u       ", pwm_value);
 
         // Bar Animation
@@ -119,23 +123,17 @@ int main(void) {
         uint8_t bar_length = (percent * 16) / 100;
 
         for (uint8_t i = 0; i < 16; i++) {
-            if (i < bar_length)
-                bar[i] = 0xFF;
-            else
-                bar[i] = ' ';
+            bar[i] = (i < bar_length) ? 0xFF : ' ';
         }
         bar[16] = '\0';
 
-        // MAX duty
         static uint8_t blink = 0;
         char max_msg[17] = "                ";
         if (percent >= 99) {
-            if (blink)
-                snprintf(max_msg, sizeof(max_msg), " MAX!");
+            if (blink) snprintf(max_msg, sizeof(max_msg), " MAX!");
             blink = !blink;
         }
 
-        // OLED updates
         sendStrXY(buffer2, 0, 0); // Line 0
         sendStrXY(buffer1, 1, 0); // Line 1
         sendStrXY(bar, 3, 0);     // Line 2
