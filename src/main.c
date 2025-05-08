@@ -47,14 +47,14 @@ ISR(USART0_RX_vect) {
 // === Timer1 PWM ===
 void timer1_pwm_init() {
     DDRB |= (1 << PB5);
-    TCCR1A = (1 << COM1A1) | (1 << WGM10);
-    TCCR1B = (1 << WGM12) | (1 << CS11);
+    TCCR1A = (1 << COM1A1) | (1 << WGM10); 
+    TCCR1B = (1 << WGM12) | (1 << CS11);    
 }
 
 // === ADC ===
 void adc_init(void) {
     ADMUX = (1 << REFS0);
-    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1);
+    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); //prescaler på 128 (side 293 i databladet)
 }
 
 uint16_t adc_read(void) {
@@ -114,12 +114,14 @@ int main(void) {
                 } else {
                     current_state = STATE_UPDATE_DISPLAY;
                 }
+                uart_send_string("[STATE] IDLE\r\n");
                 break;
 
             case STATE_UART_RECEIVED:   //modtager input fra UART, tolker MIN og MAX værdier
                 uart_rx_flag = 0;
                 process_uart_command();
                 current_state = STATE_IDLE;
+                uart_send_string("[STATE] UART_RECEIVED\r\n");
                 break;
 
             case STATE_UPDATE_DISPLAY: { //opdaterer displayet med PWM værdi og ADC værdi
@@ -156,6 +158,7 @@ int main(void) {
 
                 _delay_ms(200);
                 current_state = STATE_IDLE;
+                uart_send_string("[STATE] UPDATE_DISPLAY\r\n");
                 break;
             }
         }
