@@ -60,8 +60,17 @@ ISR(USART0_RX_vect) {
 // === Timer1 PWM ===
 void timer1_pwm_init() {
     DDRB |= (1 << PB5); // Set PB5 (OC1A) as output
-    TCCR1A = (1 << COM1A1) | (1 << WGM10); // PWM mode, clear on compare match
-    TCCR1B = (1 << WGM12) | (1 << CS11);   // Prescaler = 8, Fast PWM 8-bit
+
+    TCCR1A = (1 << COM1A1) | (1 << WGM11);  // PWM mode, phase-correct
+    TCCR1B = (1 << WGM12) | (1 << CS10);    // No prescaler, WGM13 = 1
+    ICR1 = 1023;                            //TOP = 1023 (Match med 10-bit ADC) Sample-rate = 7819 Hz (skal ændres hvis sample-rate skal ændres)
+
+    TIMSK1 |= (1 << TOIE1);                 //aktivere overflow interrupt
+}
+
+// === ADC konvertering ved overflow ===
+ISR(TIMER1_OVF_vect) {
+    ADCSRA |= (1 << ADSC);  // Start ADC-konvertering når overlow sker
 }
 
 // === ADC with interrupt ===
@@ -70,11 +79,11 @@ volatile uint8_t pwm_value = 0; // Stores current PWM value
 void adc_init(void) {
     ADMUX = (1 << REFS0); // Reference voltage = AVcc
     ADCSRA = (1 << ADEN)  // Enable ADC
-           | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0) // Prescaler = 128
            | (1 << ADIE)  // Enable ADC interrupt
-           | (1 << ADATE);// Auto trigger enable
-    ADCSRB = 0x00;
-    ADCSRA |= (1 << ADSC); // Start conversion
+           | (1 << ADATE) // Auto trigger enable
+           | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); // Prescaler = 128 = 125 KHz
+
+
 }
 
 // PWM limit values
@@ -96,7 +105,7 @@ ISR(ADC_vect) {
     if (temp_pwm > max_pwm) temp_pwm = max_pwm;
 
     pwm_value = temp_pwm;
-    OCR1A = pwm_value; // Update PWM output
+    OCR1A = adc_value; // Update PWM output
 }
 
 // === UART Command Parser ===
