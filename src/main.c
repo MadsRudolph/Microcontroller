@@ -74,7 +74,7 @@ ISR(TIMER1_OVF_vect) {
 }
 
 // === ADC with interrupt ===
-volatile uint8_t pwm_value = 0; // Stores current PWM value
+volatile uint16_t pwm_value = 0; // Stores current PWM value
 
 void adc_init(void) {
     ADMUX = (1 << REFS0); // Reference voltage = AVcc
@@ -98,14 +98,18 @@ uint8_t new_pwm_values_received = 0;
 // ADC conversion complete interrupt
 ISR(ADC_vect) {
     uint16_t adc_value = ADC;       // Read 10-bit ADC value
-    uint8_t temp_pwm = adc_value / 4; // Scale to 8-bit (0–255)
+
+    uint16_t scaled_min = ((uint32_t)min_pwm * 1023 + 127) / 255; // Scale min PWM to 10-bit
+    uint16_t scaled_max = ((uint32_t)max_pwm * 1023 + 127) / 255; // Scale max PWM to 10-bit
+
 
     // Clamp value between min and max PWM
-    if (temp_pwm < min_pwm) temp_pwm = min_pwm;
-    if (temp_pwm > max_pwm) temp_pwm = max_pwm;
+    if (adc_value < scaled_min) adc_value = scaled_min; // Set to min if below
+    if (adc_value > scaled_max) adc_value = scaled_max; // Set to max if above
 
-    pwm_value = temp_pwm;
     OCR1A = adc_value; // Update PWM output
+    pwm_value = adc_value; // Store current ADC value for display
+    
 }
 
 // === UART Command Parser ===
@@ -119,12 +123,14 @@ void process_uart_command(void) {
         temp_min_pwm = atoi((char*)&uart_buffer[4]);
         uart_send_string("Temp MIN stored. Press button to apply.\r\n");
         new_pwm_values_received = 1;
-    } else if (strncmp((char*)uart_buffer, "MAX:", 4) == 0) {
+    } 
+    else if (strncmp((char*)uart_buffer, "MAX:", 4) == 0) {
         temp_max_pwm = atoi((char*)&uart_buffer[4]);
         uart_send_string("Temp MAX stored. Press button to apply.\r\n");
         new_pwm_values_received = 1;
-    } else {
-        uart_send_string("Invalid UART command!\r\n");
+    } 
+    else {
+        uart_send_string("Invalid UART command! Use MIN: or MAX:\r\n");
     }
 }
 
@@ -172,6 +178,7 @@ int main(void) {
                         min_pwm = temp_min_pwm;
                         max_pwm = temp_max_pwm;
                         new_pwm_values_received = 0;
+                        ADCSRA |= (1 << ADSC); // force ADC conversion with new values
                         uart_send_string("MIN/MAX updated via button press.\r\n");
                     }
 
@@ -199,12 +206,11 @@ int main(void) {
 
             // Update OLED display with PWM info
             case STATE_UPDATE_DISPLAY: {
-                uint8_t local_pwm = pwm_value;
-                OCR1A = local_pwm;
-                uint8_t percent = (local_pwm * 100) / 255;
+                uint8_t display_pwm = ((uint32_t)pwm_value * 255 + 511) /1023; // Scale to 8-bit for display
+                uint8_t percent = ((uint32_t)pwm_value * 100 + 511) / 1023; // Calculate percentage
 
                 snprintf(buffer1, sizeof(buffer1), "Duty: %3u%%     ", percent);
-                snprintf(buffer2, sizeof(buffer2), "PWM:  %3u       ", local_pwm);
+                snprintf(buffer2, sizeof(buffer2), "PWM:  %3u       ", display_pwm);
 
                 char Set_Values[20];
                 if (new_pwm_values_received) {
@@ -224,7 +230,7 @@ int main(void) {
                 // Blink "MAX!" warning when PWM is at max
                 static uint8_t blink = 0;
                 char max_msg[17] = "                ";
-                if (local_pwm >= max_pwm) {
+                if (display_pwm >= max_pwm) {
                     if (blink) snprintf(max_msg, sizeof(max_msg), " MAX!");
                     blink = !blink;
                 }
@@ -236,7 +242,7 @@ int main(void) {
                 sendStrXY(bar, 2, 0);
                 sendStrXY(max_msg, 4, 0);
 
-                _delay_ms(200); // Update rate
+                _delay_ms(20); // Small delay for display update
 
                 // Check for button or new UART input
                 if (button_flag) {
