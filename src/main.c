@@ -62,7 +62,7 @@ void timer1_pwm_init() {
     DDRB |= (1 << PB5); // Set PB5 (OC1A) as output
 
     TCCR1A = (1 << COM1A1) | (1 << WGM11);  // PWM mode, phase-correct
-    TCCR1B = (1 << WGM12) | (1 << CS10);    // No prescaler, WGM13 = 1
+    TCCR1B = (1 << WGM13) | (1 << CS10);    // No prescaler, WGM13 = 1
     ICR1 = 1023;                            //TOP = 1023 (Match med 10-bit ADC) Sample-rate = 7819 Hz (skal ændres hvis sample-rate skal ændres)
 
     TIMSK1 |= (1 << TOIE1);                 //aktivere overflow interrupt
