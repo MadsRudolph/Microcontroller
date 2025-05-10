@@ -1,6 +1,3 @@
-// Set CPU frequency for delay functions
-#define F_CPU 16000000UL
-
 // Include necessary libraries
 #include <avr/io.h>
 #include <util/delay.h>
