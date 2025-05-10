@@ -140,7 +140,7 @@ int main(void) {
 
             // Update OLED display with PWM info
             case STATE_UPDATE_DISPLAY:
-                update_display(buffer1, buffer2); // Call display update function
+                update_display(pwm_value, min_pwm, max_pwm, buffer1, buffer2); // Update display with current PWM and limits
                 _delay_ms(20); // Small delay for display update
 
                 // Check for button or new UART input
