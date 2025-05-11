@@ -8,7 +8,7 @@
 #include "I2C.h"
 #include "ssd1306.h"
 
-// FSM state enum lives right here, not in a separate file 😘
+// FSM states
 typedef enum {
     STATE_RESET,
     STATE_IDLE,
