@@ -80,7 +80,6 @@ void adc_init(void) {
     ADMUX = (1 << REFS0); // AVcc as reference voltage, ADC0 as input
     ADCSRA = (1 << ADEN)  | // Enable ADC
              (1 << ADIE)  | // Enable ADC interrupt
-             (1 << ADATE) | // Auto trigger
              (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); // Prescaler 128 → 125kHz
 }
 
