@@ -169,9 +169,12 @@ int main(void) {
     clear_display();
     sei(); // Enable global interrupts
 
-    uart_send_string("UART Ready, input values for MIN: / MAX: !\r\n");
+    uart_send_string("Input values for minimun or max\r\n");
+    uart_send_string("Format: MIN:<value> or MAX:<value> (0 to 255)\r\n");
+    uart_send_string("Example: MIN:50 or MAX:200\r\n");
 
-    SystemState current_state = STATE_RESET;
+
+    SystemState current_state = STATE_UPDATE_DISPLAY; // Start in display update state
     char buffer1[20], buffer2[20]; // Buffers for display strings
 
     while (1) {
