@@ -1,262 +1,193 @@
-// === Included Libraries ===
-#include <avr/io.h>         // Core I/O register definitions
-#include <util/delay.h>     // Delay functions
-#include <stdio.h>          // sprintf & friends
-#include <stdlib.h>         // atoi, etc.
-#include <string.h>         // String functions
-#include <avr/interrupt.h>  // Interrupt macros
-#include "I2C.h"            // I2C driver
-#include "ssd1306.h"        // OLED display driver
+#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <util/delay.h>
+#include <stdio.h>
+#include "I2C.h"
+#include "ssd1306.h"
 
-// === UART Setup ===
-#define BAUD 19200
-#define MYUBRR ((F_CPU/8/BAUD)-1)  // UART baud rate formula with double speed
+//------Nye Globale variabler + UART opsætning------//
+#include <stdlib.h>
+#include <string.h>
+#include <avr/interrupt.h>
 
-// UART Buffers & Flags
-volatile char uart_buffer[32];   // Buffer for incoming UART text
-volatile uint8_t uart_index = 0; // Index in the buffer
-volatile uint8_t uart_rx_flag = 0; // Set when full line is received
-volatile int button_flag = 0;    // Set on button press (INT4)
+#define Baud 19200
+#define MYUBRR (F_CPU / 8 / Baud - 1)  
 
-// === UART Initialization ===
+volatile char uart_buffer[32];
+volatile uint8_t uart_index = 0;
+volatile uint8_t uart_rx_flag = 0;
+
+uint8_t min_pwm = 0;
+uint8_t max_pwm = 255;
+//------Nye Globale variabler + UART opsætning------//
+
+//------------------------UART-funktioner------------------------//
 void uart_init(unsigned int ubrr) {
-    // Set baud rate
     UBRR0H = (unsigned char)(ubrr >> 8);
     UBRR0L = (unsigned char)ubrr;
-
-    UCSR0A = (1 << U2X0); // Enable double speed mode
-    UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0); // Enable RX, TX, and RX complete interrupt
-    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00); // 8-bit data
-    
-    // Setup button interrupt
-    PORTE |= (1<<PE4);  // Enable pull-up resistor on PE4 (button)
-    EIMSK |= (1<<INT4); // Enable external interrupt INT4
-    EICRB |= (1<<ISC41); // Trigger INT4 on rising edge
+    UCSR0A = (1 << U2X0);  // Double speed
+    UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0);
+    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);  // 8-bit data
 }
 
-// Send a single character over UART
-void uart_send(char data) {
-    while (!(UCSR0A & (1 << UDRE0))); // Wait until ready
-    UDR0 = data; // Send char
-}
-
-void uart_send_string(const char* str) {
-    while (*str) uart_send(*str++); // Send string
-}
-
-//interrupt service routine for UART RX
-// === UART RX Interrupt ===
 ISR(USART0_RX_vect) {
     char received = UDR0;
-    if (received == '\r' || received == '\n') {
-        uart_buffer[uart_index] = '\0'; // End string
-        uart_index = 0;
+
+    if (received == '\n' || received == '\r') {
+        uart_buffer[uart_index] = '\0';
         uart_rx_flag = 1;
+        uart_index = 0;
     } else if (uart_index < sizeof(uart_buffer) - 1) {
         uart_buffer[uart_index++] = received;
     }
 }
+//------------------------UART-funktioner------------------------//
 
-// === PWM Using Timer1 ===
-void timer1_pwm_init() {
-    DDRB |= (1 << PB5); // Set PB5 (OC1A) as output
+void timer1_pwm_init()
+{
+    // Sæt PB5 (Pin 11) som output
+    DDRB |= (1 << PB5);
 
-    // Phase-correct PWM, no prescaler
-    TCCR1A = (1 << COM1A1) | (1 << WGM11);
-    TCCR1B = (1 << WGM13) | (1 << CS10);
-    ICR1 = 1023; // TOP = 1023 (matches 10-bit ADC)
-    TIMSK1 |= (1 << TOIE1); // Enable Timer1 overflow interrupt
+    // Fast PWM, 8-bit: WGM13:0 = 0b0101
+    TCCR1A = (1 << COM1A1) | (1 << WGM10);
+    TCCR1B = (1 << WGM12) | (1 << CS11); // Prescaler = 8
+
 }
 
-// === Timer Overflow Interrupt Starts ADC ===
-ISR(TIMER1_OVF_vect) {
-    ADCSRA |= (1 << ADSC); // Start ADC conversion
+
+// ADC initialisering
+void adc_init(void)
+{
+    ADMUX = (1 << REFS0);                    // AVCC reference, kanal 0
+    ADCSRA = (1 << ADEN)                     // Enable ADC
+           | (1 << ADPS2) | (1 << ADPS1);    // Prescaler = 64
 }
 
-// === ADC Init & ISR ===
-volatile uint16_t pwm_value = 0; // For display use
-
-void adc_init(void) {
-    ADMUX = (1 << REFS0); // AVcc as reference voltage, ADC0 as input
-    ADCSRA = (1 << ADEN)  | // Enable ADC
-             (1 << ADIE)  | // Enable ADC interrupt
-             (1 << ADATE) | // Auto trigger
-             (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); // Prescaler 128 → 125kHz
+// ADC læsning
+uint16_t adc_read(void)
+{
+    ADMUX = (ADMUX & 0xF0) | 0;              // Kanal 0 (A0 / PF0)
+    ADCSRA |= (1 << ADSC);                   // Start ADC
+    while (ADCSRA & (1 << ADSC));            // Vent på færdig
+    return ADC;
 }
 
-// === PWM Clamp Range ===
-uint8_t min_pwm = 0;
-uint8_t max_pwm = 255;
 
-// Temporary variables for new settings (to be confirmed with button)
-uint8_t temp_min_pwm = 0;
-uint8_t temp_max_pwm = 255;
-uint8_t new_pwm_values_received = 0;
 
-// === ADC Conversion Complete ISR ===
-ISR(ADC_vect) {
-    uint16_t adc_value = ADC; // Read ADC (0–1023)
-
-    // Scale min/max from 8-bit to 10-bit
-    uint16_t scaled_min = ((uint32_t)min_pwm * 1023 + 127) / 255;
-    uint16_t scaled_max = ((uint32_t)max_pwm * 1023 + 127) / 255;
-
-    // Clamp ADC value
-    if (adc_value < scaled_min) adc_value = scaled_min; //Set to min if below
-    if (adc_value > scaled_max) adc_value = scaled_max; //Set to max if above
-
-    OCR1A = adc_value;       // Update PWM duty
-    pwm_value = adc_value;   // Store for OLED
-}
-
-// === UART Command Parser ===
-void process_uart_command(void) {
-    uart_send_string("Got: ");
-    uart_send_string((char*)uart_buffer);
-    uart_send_string("\r\n");
-
-    if (strncmp((char*)uart_buffer, "MIN:", 4) == 0) {
-        uint8_t value = atoi((char*)&uart_buffer[4]);
-        if (value >= temp_max_pwm) {
-            uart_send_string("Error: MIN value cannot be greater than MAX!\r\n");
-        } else {
-            temp_min_pwm = value;
-            uart_send_string("Temp MIN stored. Press button to apply.\r\n");
-            new_pwm_values_received = 1;
-        }
-    } 
-    else if (strncmp((char*)uart_buffer, "MAX:", 4) == 0) {
-        uint8_t value = atoi((char*)&uart_buffer[4]);
-        if  (value <= temp_min_pwm) {
-            uart_send_string("Error: MAX value cannot be less than MIN!\r\n");
-        } else {
-            temp_max_pwm = value;
-            uart_send_string("Temp MAX stored. Press button to apply.\r\n");
-            new_pwm_values_received = 1;
-        }
-    } 
-    else {
-        uart_send_string("Invalid UART command! Use MIN: or MAX:\r\n");
-    }
-}
-
-// === FSM States ===
-typedef enum {
-    STATE_RESET,
-    STATE_IDLE,
-    STATE_UART_RECEIVED,
-    STATE_UPDATE_DISPLAY
-} SystemState;
-
-// === Button Interrupt ===
-ISR(INT4_vect) {
-    button_flag = 1;
-}
-
-// === Main Function ===
-int main(void) {
-    // Initialize peripherals
+int main(void)
+{
     timer1_pwm_init();
     I2C_Init();
     InitializeDisplay();
     adc_init();
+    //-------------------------test af LED-------------------------//
+       /*
+        Testede den ved at få den til at følge PWM-signalets duty cycle som 
+        det steg eller faldt ved gradvist at tænde eller slukke LED´en for at passe til den 
+
+        uint8_t brightness = 0;
+         int8_t step = 1;
+    
+    while (1)
+    {
+        OCR1A = brightness; //sæt duty cycle (0-255)
+
+        brightness += step; //justere lysstyrken
+
+        //vend retning af duty cycle ved min/ max værdi
+        if (brightness == 0 || brightness ==255)    //min / max grænser for Duty Cycle
+        {
+            step  = -step;
+        }
+
+        _delay_ms(10);
+    }
+    */
+    //-------------------------test af LED-------------------------//
+   
+    //-------------------------test af OLED-Display-------------------------//
+    /*uint8_t brightness = 0;
+    int8_t step = 1;
+    char buffer[16];
+
+    while (1)
+    {
+    OCR1A = brightness;
+
+    // Konverter til procent og formatter tekst
+    uint8_t percent = (brightness * 100) / 255;
+    snprintf(buffer, sizeof(buffer), "Duty: %3u%%", percent);
+
+    // clear_display();                    // Ryd displayet            (gør at skærmen tænder og slukker ved hver opdatering: BRUG IKKE HER)                    // Ryd displayet
+    sendStrXY(buffer, 0, 0);               // Vis teksten på øverste linje
+
+    // Fortsæt fade...
+    brightness += step;
+    if (brightness == 0 || brightness == 255)
+        step = -step;
+
+    _delay_ms(30);
+    }*/
+    //-------------------------test af OLED-Display-------------------------//
+
+    //-------------------------test af Potentiometer-------------------------//
+    /*char buffer1[20];
+    char buffer2[20];
+    
+    while (1)
+    {
+        uint16_t adc_value = adc_read();           // 0–1023
+        uint8_t pwm_value = adc_value / 4;         // 0–255
+        OCR1A = pwm_value;                         // Sæt PWM duty
+
+        uint8_t percent = (pwm_value * 100) / 255;
+        snprintf(buffer1, sizeof(buffer1), "Duty: %3u%%   ", percent);
+        snprintf(buffer2, sizeof(buffer2), "PWM:  %3u     ", pwm_value);
+        
+        sendStrXY(buffer1, 0, 0);    //øverste linje AKA linje 1
+        sendStrXY(buffer2, 1, 0);    //linje 2
+
+        _delay_ms(50);
+    }*/
+    //-------------------------test af Potentiometer-------------------------//
+
+    //-------------------------test af UART-------------------------//
     uart_init(MYUBRR);
-    clear_display();
-    sei(); // Enable global interrupts
-
-    uart_send_string("UART Ready, input values for MIN: / MAX: !\r\n");
-
-    SystemState current_state = STATE_RESET;
-    char buffer1[20], buffer2[20]; // Buffers for display strings
-
-    while (1) {
-        switch (current_state) {
-            case STATE_RESET:
-                // Wait for button to confirm changes
-                if (button_flag) {
-                    _delay_ms(100);
-                    button_flag = 0;
-
-                    if (new_pwm_values_received) {
-                        min_pwm = temp_min_pwm;
-                        max_pwm = temp_max_pwm;
-                        new_pwm_values_received = 0;
-                        ADCSRA |= (1 << ADSC); // Trigger ADC to apply new limits
-                        uart_send_string("MIN/MAX updated via button press.\r\n");
-                    }
-
-                    InitializeDisplay();
-                    clear_display();
-                    current_state = STATE_IDLE;
+    sei();  // enable interrupts
+    //-------------------------------------------------------------//
+    char buffer1[18], buffer2[18], buffer3[18], buffer4[18];
+    while (1)
+    {
+        if (uart_rx_flag) {
+            uart_rx_flag = 0;
+            uint16_t min_in, max_in;
+            if (sscanf((char*)uart_buffer, "%u %u", &min_in, &max_in) == 2) {
+                if (min_in <= 255 && max_in <= 255 && min_in < max_in) {
+                    min_pwm = min_in;
+                    max_pwm = max_in;
                 }
-                break;
-
-            case STATE_IDLE:
-                // Check for UART input or move to update
-                current_state = uart_rx_flag ? STATE_UART_RECEIVED : STATE_UPDATE_DISPLAY;
-                break;
-
-            case STATE_UART_RECEIVED:
-                uart_rx_flag = 0;
-                process_uart_command();
-                current_state = STATE_IDLE;
-                break;
-
-            case STATE_UPDATE_DISPLAY: {
-                // Convert 10-bit PWM to 8-bit and percentage
-                uint8_t display_pwm = ((uint32_t)pwm_value * 255 + 511) / 1023;
-                uint8_t percent = ((uint32_t)pwm_value * 100 + 511) / 1023;
-
-                // Format strings
-                snprintf(buffer1, sizeof(buffer1), "Duty: %3u%%     ", percent);
-                snprintf(buffer2, sizeof(buffer2), "PWM:  %3u       ", display_pwm);
-
-                char Set_Values[30];
-                if (new_pwm_values_received) {
-                    snprintf(Set_Values, sizeof(Set_Values), "Press button to set values");
-                } else {
-                    snprintf(Set_Values, sizeof(Set_Values), "Min:%3u Max:%3u", min_pwm, max_pwm);
-                }
-
-                // Blinking bar logic
-                static uint8_t blink = 0;
-                char bar[17];
-                uint8_t bar_length = (percent * 16) / 100;
-
-                for (uint8_t i = 0; i < 16; i++) {
-                    if (i < bar_length) {
-                        // Blink bar if at max
-                        if (display_pwm >= max_pwm) {
-                            bar[i] = blink ? 0xFF : ' ';
-                        } else {
-                            bar[i] = 0xFF;
-                        }
-                    } else {
-                        bar[i] = ' ';
-                    }
-                }
-                bar[16] = '\0';
-                blink = !blink; // Toggle for next frame
-
-                // Send text to OLED
-                sendStrXY(buffer2, 0, 0);
-                sendStrXY(buffer1, 1, 0);
-                sendStrXY(Set_Values, 6, 0);
-                sendStrXY(bar, 2, 0);
-
-                _delay_ms(10); // Frame delay
-
-                // State transitions
-                if (button_flag) {
-                    _delay_ms(100);
-                    current_state = STATE_RESET;
-                } else if (uart_rx_flag) {
-                    current_state = STATE_UART_RECEIVED;
-                } else {
-                    current_state = STATE_IDLE;
-                }
-                break;
             }
         }
+        uint16_t adc_value = adc_read();  // 0–1023
+        uint8_t raw_pwm = adc_value / 4;  // 0–255
+        // Skaler PWM til brugerens område
+        uint8_t pwm_value = min_pwm + ((raw_pwm * (max_pwm - min_pwm)) / 255);
+        OCR1A = pwm_value;
+        uint8_t percent = (pwm_value * 100) / 255;
+        //-------------------------------------------------------------//
+        snprintf(buffer1, sizeof(buffer1), "PWM: %3u (%3u%%)", pwm_value, percent);
+        snprintf(buffer2, sizeof(buffer2), "Min: %3u", min_pwm);
+        snprintf(buffer3, sizeof(buffer3), "Max: %3u", max_pwm);
+        snprintf(buffer4, sizeof(buffer4), "Raw ADC: %4u", adc_value);
+        //-------------------------------------------------------------//
+        sendStrXY(buffer1, 0, 0);
+        sendStrXY(buffer2, 1, 0);
+        sendStrXY(buffer3, 2, 0);
+        sendStrXY(buffer4, 3, 0);
+        _delay_ms(100);
     }
+    //-------------------------test af UART-------------------------//
+
+
+
 }
