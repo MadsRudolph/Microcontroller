@@ -116,9 +116,11 @@ void process_uart_command(void) {
     uart_send_string("\r\n");
 
     if (strncmp((char*)uart_buffer, "MIN:", 4) == 0) {
-        uint8_t value = atoi((char*)&uart_buffer[4]);
-        if (value >= temp_max_pwm) {
-            uart_send_string("Error: MIN value cannot be greater than MAX!\r\n");
+        int value = atoi((char*)&uart_buffer[4]);
+        if (value < 0 || value > 255) {
+            uart_send_string("Error: MIN must be between 0 and 255!\r\n");
+        } else if (value >= temp_max_pwm) {
+            uart_send_string("Error: MIN cannot be >= MAX!\r\n");
         } else {
             temp_min_pwm = value;
             uart_send_string("Temp MIN stored. Press button to apply.\r\n");
@@ -126,9 +128,11 @@ void process_uart_command(void) {
         }
     } 
     else if (strncmp((char*)uart_buffer, "MAX:", 4) == 0) {
-        uint8_t value = atoi((char*)&uart_buffer[4]);
-        if  (value <= temp_min_pwm) {
-            uart_send_string("Error: MAX value cannot be less than MIN!\r\n");
+        int value = atoi((char*)&uart_buffer[4]);
+        if (value < 0 || value > 255) {
+            uart_send_string("Error: MAX must be between 0 and 255!\r\n");
+        } else if (value <= temp_min_pwm) {
+            uart_send_string("Error: MAX cannot be <= MIN!\r\n");
         } else {
             temp_max_pwm = value;
             uart_send_string("Temp MAX stored. Press button to apply.\r\n");
@@ -139,6 +143,7 @@ void process_uart_command(void) {
         uart_send_string("Invalid UART command! Use MIN: or MAX:\r\n");
     }
 }
+
 
 // === FSM States ===
 typedef enum {
