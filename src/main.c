@@ -10,7 +10,7 @@
 
 // FSM states
 typedef enum {
-    STATE_RESET,
+    STATE_APPLY,
     STATE_IDLE,
     STATE_UART_RECEIVED,
     STATE_UPDATE_DISPLAY
@@ -43,7 +43,7 @@ int main(void) {
 
     while (1) {
         switch (current_state) {
-            case STATE_RESET:
+            case STATE_APPLY:
                 if (button_flag) {
                     _delay_ms(100);
                     button_flag = 0;
@@ -77,7 +77,7 @@ int main(void) {
 
                 if (button_flag) {
                     _delay_ms(100);
-                    current_state = STATE_RESET;
+                    current_state = STATE_APPLY;
                 } else if (uart_rx_flag) {
                     current_state = STATE_UART_RECEIVED;
                 } else {
